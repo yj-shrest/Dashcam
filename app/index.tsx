@@ -1,69 +1,80 @@
-import { View, Pressable, Text, PermissionsAndroid, Platform, StyleSheet} from 'react-native';
-import {Camera as CameraType, CameraView,useCameraPermissions, CameraCapturedPicture} from "expo-camera"
-import React, { useState, useRef, useEffect } from 'react';
-import tw from "twrnc"
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { View, Pressable, Text } from 'react-native';
+import { Camera as CameraType, CameraView, useCameraPermissions, CameraCapturedPicture } from 'expo-camera';
+import tw from 'twrnc';
 import AntDesign from '@expo/vector-icons/AntDesign';
-import * as Medialibrary from "expo-media-library"
-import { BlurView } from '@react-native-community/blur';
+import * as Medialibrary from 'expo-media-library';
 
 export default function Index() {
-  const [started, setStarted] = useState(false) 
-  
-  const [cameraP, setCameraP] = useCameraPermissions()
-  const [permission, setPermission] = useState({camera:false, storage: false})
+  const [started, setStarted] = useState(false);
+  const [count, setCount] = useState(0);
+  const [cameraP, setCameraP] = useCameraPermissions();
+  const [permission, setPermission] = useState({ camera: false, storage: false });
   const [capturedPhoto, setCapturedPhoto] = useState<CameraCapturedPicture | null>(null);
+  const [requestId, setRequestId] = useState<Number|null>(null);
   const cameraRef = useRef(null);
-  const [intervalId, setIntervalId] = useState<NodeJS.Timeout | null>(null);
-  let another = false;
-  useEffect(()=>{   
-  (async ()=>{
-       await setCameraP() 
-      another = cameraP?.granted===undefined?false: cameraP?.granted
-      console.log(another, "there")
-      const { status } = await Medialibrary.requestPermissionsAsync();
-      console.log(47)
-      setPermission({camera: another, storage:status==="granted"});
+
+  const saveWrapper = useCallback(async () => {
+    if (capturedPhoto && permission.storage) {
+      try {
+        const asset = await Medialibrary.createAssetAsync(capturedPhoto.uri);
+        await Medialibrary.createAlbumAsync('Expo', asset, false);
+        console.log('done', count);
+      } catch (error) {
+        console.log('Error saving photo:', error);
       }
-  
-      )()
-  },[])
+    }
+  }, [capturedPhoto, permission.storage, count]);
+
   useEffect(() => {
-    (async () => {
-      if (capturedPhoto && permission.storage) {
+    saveWrapper();
+  }, [capturedPhoto, saveWrapper]);
 
-        try {
-          const asset = await Medialibrary.createAssetAsync(capturedPhoto?.uri);
-          await Medialibrary.createAlbumAsync('Expo', asset, false);
-          console.log("done")
-        } catch (error) {
-          console.log('Error saving photo:', error);
-        }
-      }
-    })();
-  }, [capturedPhoto]);
-  
-  const clickHandler = async () => {
-  setStarted(!started);
+  useEffect(() => {
+    const wrapper = async () => {
+      const cameraStatus = await setCameraP();
+      const cameraGranted = cameraStatus?.granted || false;
 
-  if (cameraRef.current && started) {
-    // Start the interval to take photos every 3 seconds
-    const id = setInterval(async () => {
+      const { status: storageStatus } = await Medialibrary.requestPermissionsAsync();
+      const storageGranted = storageStatus === 'granted';
+
+      setPermission({ camera: cameraGranted, storage: storageGranted });
+    };
+    wrapper();
+  }, []);
+
+  const takePicture = useCallback(async () => {
+    if (cameraRef.current) {
       const options = {
-        autoShutterDuration: 10,
-        quality: 0.25,
+        quality: 0.2,
       };
-      const photo = await (cameraRef.current as any).takePictureAsync(options);
-      setCapturedPhoto(photo);
-    }, 500);
+      try {
+        const photo = await (cameraRef.current as any).takePictureAsync(options);
+        setCapturedPhoto(photo);
+        setCount((count) => count + 1);
+      } catch (error) {
+        console.log('Error taking picture:', error);
+      }
+    }
+  }, [cameraRef]);
 
-    setIntervalId(id);
-  } else if (intervalId) {
-    // Clear the interval to stop taking photos
-    clearInterval(intervalId);
-    setIntervalId(null);
+  const animate = useCallback(() => {
+  if (started) {
+    const id = requestAnimationFrame(animate);
+    setRequestId(id);
+    takePicture();
   }
-};
+}, [started, takePicture]);
 
+  useEffect(() => {
+    if (started) {
+      requestAnimationFrame(animate);
+    }
+  }, [started, animate]);
+
+  const clickHandler = () => {
+    setStarted((prevStarted) => !prevStarted);
+  };
   return (
     <View
     style={
@@ -90,10 +101,3 @@ export default function Index() {
 }
 
 
-const styles = StyleSheet.create({
-  camera: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  }
-});
